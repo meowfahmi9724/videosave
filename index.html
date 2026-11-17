@@ -161,41 +161,48 @@ const norm=u=>(u||"").trim().replace(/\/+$/,"");
 const MAIN=()=>norm(window.API_URL),HOME=()=>norm(window.API_URL_HOME);
 const hasApi=()=>!!(MAIN()||HOME());
 const isYT=u=>{try{return/(^|\.)(youtube\.com|youtu\.be)$/i.test(new URL(u).hostname)}catch(e){return false}};
-/* সার্ভারের ক্রম: ইউটিউব লিংকে আগে ঘরের সার্ভার (থাকলে), অন্যথায় মূল সার্ভার */
-const order=(url,first)=>{let l=[MAIN(),HOME()].filter(Boolean);l=[...new Set(l)];
+/* সার্ভারের ক্রম: আগে Render (মূল), ব্যর্থ হলে ফোনের Termux (127.0.0.1), তারপর টানেল লিংক */
+const LOCAL="http://127.0.0.1:8000",sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const order=first=>{let l=[...new Set([MAIN(),LOCAL,HOME()].filter(Boolean))];
   if(first&&l.includes(first))l=[first,...l.filter(x=>x!==first)];
-  else if(isYT(url)&&HOME()&&l.includes(HOME()))l=[HOME(),...l.filter(x=>x!==HOME())];
   return l};
-async function getInfo(url){
-  let err=null;
-  for(const b of order(url)){
-    const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),b===HOME()&&MAIN()?12000:120000);
-    try{
-      const r=await fetch(`${b}/api/info?url=${encodeURIComponent(url)}`,{signal:ctl.signal});
-      const d=await r.json().catch(()=>null);clearTimeout(t);
-      if(r.ok&&d)return{d,b};
-      if(d&&d.error&&!err)err=new Error(d.error);
-    }catch(e){clearTimeout(t)}
+const alive=async(b,ms)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
+  try{const r=await fetch(b+"/",{signal:c.signal,cache:"no-store"});return r.ok}catch(e){return false}finally{clearTimeout(t)}};
+async function call(path,{first="",ms=120000,json=false,wait=240000}={}){
+  let err=null,waiting=false;const t0=Date.now();
+  for(;;){
+    if(waiting){$("lds").textContent="সার্ভার পাওয়া গেছে, কাজ চলছে…";waiting=false}
+    for(const b of order(first)){
+      if(b!==MAIN()&&!(await alive(b,b===LOCAL?2500:6000)))continue;
+      const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),ms);
+      try{
+        const r=await fetch(b+path,{signal:ctl.signal});clearTimeout(t);
+        if(r.ok){
+          if(!json)return{r,b};
+          const d=await r.json().catch(()=>null);
+          if(d)return{r,b,d};
+        }else{
+          const d=await r.json().catch(()=>null);
+          if(d&&d.error&&!err)err=new Error(d.error);
+        }
+      }catch(e){clearTimeout(t)}
+    }
+    if(err)throw err;
+    if(Date.now()-t0>wait)break;
+    waiting=true;$("lds").textContent="সার্ভার পাওয়া যাচ্ছে না। Termux-এ bash start.sh দিন, চালু হলেই নিজে থেকে শুরু হবে…";
+    await sleep(3000);
   }
-  throw err||new Error("সার্ভারে যোগাযোগ করা যায়নি। কিছুক্ষণ পরে আবার চেষ্টা করুন।");
+  throw new Error("সার্ভারে যোগাযোগ করা যায়নি।");
 }
-async function getFile(url,q,first){
-  let err=null;
-  for(const b of order(url,first)){
-    try{
-      const r=await fetch(`${b}/api/download?${q}`);
-      if(r.ok)return r;
-      const d=await r.json().catch(()=>null);
-      if(d&&d.error&&!err)err=new Error(d.error);
-    }catch(e){}
-  }
-  throw err||new Error("সার্ভারে যোগাযোগ করা যায়নি।");
-}
+async function getInfo(url){const{d,b}=await call(`/api/info?url=${encodeURIComponent(url)}`,{json:true});return{d,b}}
+const getFile=(q,first)=>call(`/api/download?${q}`,{first,ms:600000});
 const say=(t,e)=>{$("msg").textContent=t;$("msg").className=e?"err":""};
 const showLoad=(t,sub)=>{$("ldt").textContent=t;$("lds").textContent=sub||"";$("ld").hidden=false};
 const hideLoad=()=>{$("ld").hidden=true};
 addEventListener("load",()=>setTimeout(hideLoad,500));
 setTimeout(hideLoad,5000);
+
+if(MAIN())fetch(MAIN()+"/",{mode:"no-cors",cache:"no-store"}).catch(()=>{});
 
 /* ইনস্টল */
 let dp=null;
@@ -268,12 +275,21 @@ $("dl").onclick=async()=>{
   const q=`url=${encodeURIComponent(S.url)}&type=${S.type}`+(S.type==="video"?`&height=${S.h}`:"");
   const bar=$("prog");bar.hidden=false;bar.classList.add("ind");$("pt").textContent="";showLoad("ডাউনলোড হচ্ছে…","সার্ভার ফাইল তৈরি করছে, একটু অপেক্ষা করুন");
   try{
-    const r=await getFile(S.url,q,S.api);
-    const total=+r.headers.get("Content-Length")||0,rd=r.body.getReader(),parts=[];let got=0;
-    bar.classList.remove("ind");
-    for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;
-      bar.firstElementChild.style.width=total?(got/total*100)+"%":"60%";
-      $("lds").textContent=total?Math.round(got/total*100)+"%":(got/1048576).toFixed(1)+" MB"}
+    let parts,r;
+    for(let tries=0;;tries++){
+      try{
+        ({r}=await getFile(q,S.api));
+        const total=+r.headers.get("Content-Length")||0,rd=r.body.getReader();parts=[];let got=0;
+        bar.classList.remove("ind");
+        for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;
+          bar.firstElementChild.style.width=total?(got/total*100)+"%":"60%";
+          $("lds").textContent=total?Math.round(got/total*100)+"%":(got/1048576).toFixed(1)+" MB"}
+        break;
+      }catch(e){
+        if(!(e instanceof TypeError)||tries>=3)throw e;
+        bar.classList.add("ind");$("lds").textContent="সংযোগ ছিঁড়ে গেছে, আবার শুরু হচ্ছে…";await sleep(3000);
+      }
+    }
     const blob=new Blob(parts,{type:r.headers.get("Content-Type")||"application/octet-stream"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);
     a.download=nameFrom(r.headers.get("Content-Disposition"))||(S.type==="audio"?"audio.mp3":"video.mp4");

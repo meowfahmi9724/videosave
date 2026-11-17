@@ -18,6 +18,12 @@ def find_cookies():
 
 COOKIES = find_cookies()
 
+@app.after_request
+def pna(resp):
+    # https সাইট থেকে ফোনের লোকাল সার্ভারে (127.0.0.1) যোগাযোগের অনুমতি
+    resp.headers["Access-Control-Allow-Private-Network"] = "true"
+    return resp
+
 def attempts():
     """একের পর এক চেষ্টা: প্রথমে ইউটিউবের বট-চেক এড়ানো ক্লায়েন্ট, ব্যর্থ হলে ডিফল্ট।"""
     base = {"quiet": True, "no_warnings": True, "noplaylist": True,

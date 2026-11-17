@@ -4,4 +4,4 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -U -r requirements.txt
 COPY app.py .
-CMD gunicorn -b 0.0.0.0:${PORT:-8000} -w 1 --threads 4 --timeout 600 app:app
+CMD sh -c "pip install -q -U yt-dlp || true; exec gunicorn -b 0.0.0.0:${PORT:-8000} -w 1 --threads 4 --timeout 600 app:app"
