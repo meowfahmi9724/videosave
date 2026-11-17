@@ -1,12 +1,12 @@
 # ভিডিও সেভার
 
 ## ১. ব্যাকএন্ড (ফ্রি, Render)
-1. এই ফোল্ডার GitHub রিপোতে পুশ করুন।
+1. এই ফোল্ডার GitHub রিপোতে আপলোড করুন।
 2. render.com এ লগইন → New → Blueprint → রিপো সিলেক্ট করুন (`render.yaml` নিজে থেকে কাজ করবে; সব ফাইল একই জায়গায়)।
 3. ডিপ্লয় শেষে পাওয়া লিংক (যেমন `https://videosave-api.onrender.com`) কপি করুন।
 
 ## ২. ফ্রন্টএন্ড (ফ্রি, GitHub Pages)
-1. `index.html` এ `DEFAULT_API` এর ভেতর ওই লিংক বসান।
+1. `config.js` এ `window.API_URL` এর ভেতর ওই লিংক বসান (শেষে `/` দেবেন না)।
 2. রিপো Settings → Pages → Branch: main, root → Save।
 
 ## নোট
