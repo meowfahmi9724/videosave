@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ভিডিও সেভার</title>
+<style>
+:root{--bg:#f6f4ef;--card:#fff;--ink:#1d2433;--mute:#6b7280;--line:#e3e0d8;--acc:#0d6e6e;--accInk:#fff;--err:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#12161c;--card:#1a2029;--ink:#e8ecf2;--mute:#97a1b0;--line:#2a323f;--acc:#3cc4b4;--accInk:#06201d;--err:#ff8a7a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Noto Sans Bengali",system-ui,sans-serif;padding:max(20px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom))}
+main{max-width:520px;margin:0 auto}
+h1{font-size:26px;margin:8px 0 4px}
+p.sub{color:var(--mute);margin:0 0 20px}
+.row{display:flex;gap:8px}
+input{flex:1;min-width:0;padding:14px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);font:inherit}
+input:focus,button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px}
+.go{background:var(--acc);color:var(--accInk);padding:0 18px;font-weight:700}
+.go:disabled{opacity:.6}
+.paste{background:none;color:var(--acc);padding:8px 0;font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-top:18px}
+.card img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block;background:var(--line)}
+.meta{padding:14px 16px}
+.meta b{display:block}
+.meta span{color:var(--mute);font-size:14px}
+h2{font-size:15px;margin:0 16px 10px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 16px 16px}
+.grid button{background:var(--bg);border:1.5px solid var(--line);color:var(--ink);padding:12px 0;font-weight:700}
+.grid button:active{background:var(--acc);color:var(--accInk)}
+.grid .mp3{grid-column:1/-1;border-color:var(--acc);color:var(--acc)}
+#msg{margin-top:14px;min-height:22px;color:var(--mute)}
+#msg.err{color:var(--err)}
+details{margin-top:28px;color:var(--mute);font-size:14px}
+details input{margin-top:8px;width:100%}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>ভিডিও সেভার</h1>
+  <p class="sub">লিংক পেস্ট করুন, রেজুলেশন বেছে নিন, ফোনে সেভ করুন।</p>
+
+  <div class="row">
+    <input id="url" type="url" inputmode="url" placeholder="ভিডিওর লিংক" autocomplete="off">
+    <button class="go" id="fetch">খুঁজুন</button>
+  </div>
+  <button class="paste" id="paste">ক্লিপবোর্ড থেকে পেস্ট</button>
+  <div id="msg" role="status"></div>
+
+  <section class="card" id="result" hidden>
+    <img id="thumb" alt="">
+    <div class="meta"><b id="title"></b><span id="by"></span></div>
+    <h2>ভিডিও</h2>
+    <div class="grid" id="vids"></div>
+    <h2>অডিও</h2>
+    <div class="grid"><button class="mp3" id="mp3">MP3 ডাউনলোড</button></div>
+  </section>
+
+  <details>
+    <summary>সার্ভার সেটিং</summary>
+    <input id="api" type="url" placeholder="https://your-api.onrender.com">
+  </details>
+</main>
+<script>
+// এখানে নিজের ব্যাকএন্ডের লিংক বসান (শেষে / দেবেন না)
+const DEFAULT_API = "";
+
+const $ = id => document.getElementById(id);
+const store = { get(k){ try{return localStorage.getItem(k)||""}catch(e){return ""} },
+                set(k,v){ try{localStorage.setItem(k,v)}catch(e){} } };
+$("api").value = store.get("api") || DEFAULT_API;
+$("api").addEventListener("change", () => store.set("api", $("api").value.trim()));
+const api = () => ($("api").value.trim() || DEFAULT_API).replace(/\/+$/, "");
+
+function say(t, err){ $("msg").textContent = t; $("msg").className = err ? "err" : ""; }
+
+$("paste").onclick = async () => {
+  try { $("url").value = await navigator.clipboard.readText(); } catch(e){ say("পেস্ট করা যায়নি, হাতে পেস্ট করুন।", true); }
+};
+
+$("fetch").onclick = async () => {
+  const url = $("url").value.trim();
+  if(!api()){ say("আগে নিচে সার্ভার সেটিংয়ে ব্যাকএন্ডের লিংক দিন।", true); return; }
+  if(!/^https?:\/\//.test(url)){ say("সঠিক লিংক দিন।", true); return; }
+  $("result").hidden = true; $("fetch").disabled = true; say("ভিডিও খোঁজা হচ্ছে… (প্রথমবার সার্ভার জাগতে ১ মিনিট লাগতে পারে)");
+  try{
+    const r = await fetch(`${api()}/api/info?url=${encodeURIComponent(url)}`);
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || "সমস্যা হয়েছে");
+    $("thumb").src = d.thumbnail || ""; $("title").textContent = d.title || "ভিডিও";
+    $("by").textContent = [d.uploader, d.duration && fmt(d.duration)].filter(Boolean).join(" • ");
+    const hs = (d.heights && d.heights.length) ? d.heights : [1080,720,360];
+    $("vids").innerHTML = "";
+    hs.forEach(h => { const b = document.createElement("button"); b.textContent = h + "p";
+      b.onclick = () => dl(url, "video", h); $("vids").appendChild(b); });
+    $("mp3").onclick = () => dl(url, "audio");
+    $("result").hidden = false; say("");
+  }catch(e){ say(e.message, true); }
+  $("fetch").disabled = false;
+};
+
+function dl(url, type, h){
+  say("ডাউনলোড শুরু হচ্ছে… ফাইল তৈরি হতে কিছুক্ষণ লাগবে, অপেক্ষা করুন।");
+  const q = `url=${encodeURIComponent(url)}&type=${type}` + (h ? `&height=${h}` : "");
+  window.location.href = `${api()}/api/download?${q}`;
+}
+function fmt(s){ const m = Math.floor(s/60), r = Math.floor(s%60); return m + ":" + String(r).padStart(2,"0"); }
+</script>
+</body>
+</html>
