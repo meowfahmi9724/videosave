@@ -153,11 +153,44 @@ footer{text-align:center;margin-top:30px}
 
 <div class="ld" id="ld" role="status" aria-live="polite"><div class="ldb"><div class="spin"></div><b id="ldt">খোলা হচ্ছে…</b><span id="lds"></span></div></div>
 
-<script src="config.js?v=3"></script>
+<script src="config.js?v=4"></script>
 <script>
 const $=id=>document.getElementById(id);
 const store={get(k){try{return localStorage.getItem(k)||""}catch(e){return ""}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
-const api=()=>(window.API_URL||"").replace(/\/+$/,"");
+const norm=u=>(u||"").trim().replace(/\/+$/,"");
+const MAIN=()=>norm(window.API_URL),HOME=()=>norm(window.API_URL_HOME);
+const hasApi=()=>!!(MAIN()||HOME());
+const isYT=u=>{try{return/(^|\.)(youtube\.com|youtu\.be)$/i.test(new URL(u).hostname)}catch(e){return false}};
+/* সার্ভারের ক্রম: ইউটিউব লিংকে আগে ঘরের সার্ভার (থাকলে), অন্যথায় মূল সার্ভার */
+const order=(url,first)=>{let l=[MAIN(),HOME()].filter(Boolean);l=[...new Set(l)];
+  if(first&&l.includes(first))l=[first,...l.filter(x=>x!==first)];
+  else if(isYT(url)&&HOME()&&l.includes(HOME()))l=[HOME(),...l.filter(x=>x!==HOME())];
+  return l};
+async function getInfo(url){
+  let err=null;
+  for(const b of order(url)){
+    const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),b===HOME()&&MAIN()?12000:120000);
+    try{
+      const r=await fetch(`${b}/api/info?url=${encodeURIComponent(url)}`,{signal:ctl.signal});
+      const d=await r.json().catch(()=>null);clearTimeout(t);
+      if(r.ok&&d)return{d,b};
+      if(d&&d.error&&!err)err=new Error(d.error);
+    }catch(e){clearTimeout(t)}
+  }
+  throw err||new Error("সার্ভারে যোগাযোগ করা যায়নি। কিছুক্ষণ পরে আবার চেষ্টা করুন।");
+}
+async function getFile(url,q,first){
+  let err=null;
+  for(const b of order(url,first)){
+    try{
+      const r=await fetch(`${b}/api/download?${q}`);
+      if(r.ok)return r;
+      const d=await r.json().catch(()=>null);
+      if(d&&d.error&&!err)err=new Error(d.error);
+    }catch(e){}
+  }
+  throw err||new Error("সার্ভারে যোগাযোগ করা যায়নি।");
+}
 const say=(t,e)=>{$("msg").textContent=t;$("msg").className=e?"err":""};
 const showLoad=(t,sub)=>{$("ldt").textContent=t;$("lds").textContent=sub||"";$("ld").hidden=false};
 const hideLoad=()=>{$("ld").hidden=true};
@@ -181,7 +214,7 @@ document.querySelectorAll(".mod").forEach(m=>m.addEventListener("click",e=>{if(e
 $("paste").onclick=async()=>{try{$("url").value=await navigator.clipboard.readText()}catch(e){say("পেস্ট করা যায়নি, ইনপুটে চেপে ধরে পেস্ট করুন।",true)}};
 
 /* অবস্থা */
-let S={type:"video",h:720,max:0,url:"",busy:false};
+let S={type:"video",h:720,max:0,url:"",busy:false,api:""};
 const TAG={2160:"4K",1440:"2K",1080:"Full HD",720:"HD",480:"SD",360:"SD",240:"কম ডেটা",144:"খুব কম ডেটা"};
 const fmt=s=>{s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),r=s%60;return(h?h+":"+String(m).padStart(2,"0"):m)+":"+String(r).padStart(2,"0")};
 
@@ -210,14 +243,12 @@ $("tA").onclick=()=>{S.type="audio";sync()};
 /* খোঁজা */
 $("fetch").onclick=async()=>{
   const url=$("url").value.trim();
-  if(!api()){say("সার্ভার এখন সংযুক্ত নেই। কিছুক্ষণ পরে আবার চেষ্টা করুন।",true);return}
+  if(!hasApi()){say("সার্ভার এখন সংযুক্ত নেই। কিছুক্ষণ পরে আবার চেষ্টা করুন।",true);return}
   if(!/^https?:\/\//.test(url)){say("সঠিক লিংক দিন (https:// দিয়ে শুরু)।",true);return}
   $("result").hidden=true;$("fetch").disabled=true;say("");showLoad("খোঁজা হচ্ছে…","সার্ভার ঘুমিয়ে থাকলে প্রথমবার ১ মিনিট লাগতে পারে");
   try{
-    const r=await fetch(`${api()}/api/info?url=${encodeURIComponent(url)}`);
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok)throw new Error(d.error||"ভিডিও পাওয়া যায়নি");
-    S.url=url;S.max=(d.heights||[])[0]||0;S.type="video";
+    const{d,b}=await getInfo(url);
+    S.api=b;S.url=url;S.max=(d.heights||[])[0]||0;S.type="video";
     $("thumb").src=d.thumbnail||"";$("dur").textContent=d.duration?fmt(d.duration):"";$("dur").hidden=!d.duration;
     $("title").textContent=d.title||"ভিডিও";$("by").textContent=d.uploader||"";
     drawRes(d.heights||[]);sync();resetProg();
@@ -237,8 +268,7 @@ $("dl").onclick=async()=>{
   const q=`url=${encodeURIComponent(S.url)}&type=${S.type}`+(S.type==="video"?`&height=${S.h}`:"");
   const bar=$("prog");bar.hidden=false;bar.classList.add("ind");$("pt").textContent="";showLoad("ডাউনলোড হচ্ছে…","সার্ভার ফাইল তৈরি করছে, একটু অপেক্ষা করুন");
   try{
-    const r=await fetch(`${api()}/api/download?${q}`);
-    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||"ডাউনলোড ব্যর্থ হয়েছে")}
+    const r=await getFile(S.url,q,S.api);
     const total=+r.headers.get("Content-Length")||0,rd=r.body.getReader(),parts=[];let got=0;
     bar.classList.remove("ind");
     for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;
