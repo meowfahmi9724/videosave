@@ -22,6 +22,9 @@ def attempts():
     """একের পর এক চেষ্টা: প্রথমে ইউটিউবের বট-চেক এড়ানো ক্লায়েন্ট, ব্যর্থ হলে ডিফল্ট।"""
     base = {"quiet": True, "no_warnings": True, "noplaylist": True,
             "retries": 3, "socket_timeout": 30}
+    # ইউটিউবের জন্য JS runtime লাগে (Termux-এ: pkg install nodejs)
+    if shutil.which("node"):
+        base["js_runtimes"] = {"node": {}}
     if COOKIES:
         base["cookiefile"] = COOKIES
     tuned = dict(base)
@@ -40,9 +43,16 @@ def friendly(e):
         return "ইউটিউব এই সার্ভারকে আটকে দিয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।"
     if "Private video" in m or "private" in m.lower():
         return "ভিডিওটি প্রাইভেট, ডাউনলোড করা যাবে না।"
+    if "isn't available to everyone" in m or "login required" in m.lower():
+        return "এই ভিডিও লগইন ছাড়া দেখা যায় না (সীমাবদ্ধ বা প্রাইভেট)।"
     if "Unsupported URL" in m:
         return "এই লিংক সাপোর্ট করে না।"
     return m[:200]
+
+def safe_name(title, ext):
+    t = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", title or "video").strip()
+    t = t[:40].strip() or "video"
+    return f"{t}.{ext}"
 
 @app.get("/")
 def health():
@@ -80,9 +90,9 @@ def download():
     except ValueError:
         h = 720
     tmp = tempfile.mkdtemp()
-    path, err = None, None
+    path, err, title = None, None, None
     for opts in attempts():
-        opts["outtmpl"] = os.path.join(tmp, "%(title).80s.%(ext)s")
+        opts["outtmpl"] = os.path.join(tmp, "%(id).60s.%(ext)s")
         if kind == "audio":
             opts["format"] = "bestaudio/best"
             opts["postprocessors"] = [{"key": "FFmpegExtractAudio",
@@ -93,11 +103,13 @@ def download():
             opts["merge_output_format"] = "mp4"
         try:
             with yt_dlp.YoutubeDL(opts) as y:
-                y.download([url])
-            files = glob.glob(os.path.join(tmp, "*"))
+                meta = y.extract_info(url, download=True)
+            files = [f for f in glob.glob(os.path.join(tmp, "*"))
+                     if not f.endswith((".part", ".ytdl", ".temp"))]
             if not files:
                 raise RuntimeError("ফাইল তৈরি হয়নি")
             path = files[0]
+            title = (meta or {}).get("title")
             break
         except Exception as e:
             err = e
@@ -109,7 +121,7 @@ def download():
     def cleanup(resp):
         shutil.rmtree(tmp, ignore_errors=True)
         return resp
-    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+    return send_file(path, as_attachment=True, download_name=safe_name(title, path.rsplit(".", 1)[-1]))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
