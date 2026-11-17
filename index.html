@@ -87,7 +87,13 @@ footer{text-align:center;margin-top:30px}
 .fb{display:flex;justify-content:center;align-items:center;gap:8px;padding:12px;border-radius:14px;background:#1877f2;color:#fff;font-weight:700;text-decoration:none}
 .close{width:100%;margin-top:10px;padding:11px;border-radius:14px;background:rgba(255,255,255,.07);color:var(--tx)}
 .sheet ol{text-align:left;padding-left:20px;margin:12px 0;color:var(--mut);font-size:15px}
-@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+.ld{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgba(2,8,14,.8);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.ldb{width:100%;max-width:280px;text-align:center;padding:28px 22px 24px;border-radius:26px;background:linear-gradient(180deg,#0e2230,#0a1722);border:1px solid rgba(45,212,191,.28);box-shadow:0 30px 80px rgba(0,0,0,.6)}
+.spin{width:54px;height:54px;margin:0 auto 16px;border-radius:50%;border:5px solid rgba(255,255,255,.12);border-top-color:var(--acc);animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ldb b{display:block;font-size:19px}
+.ldb span{display:block;min-height:22px;margin-top:6px;color:var(--mut);font-size:14px;line-height:1.45}
+@media (prefers-reduced-motion:reduce){*:not(.spin){animation:none!important}.spin{animation-duration:1.6s!important}}
 </style>
 </head>
 <body>
@@ -145,12 +151,18 @@ footer{text-align:center;margin-top:30px}
   <button class="close" data-close>ঠিক আছে</button>
 </div></div>
 
+<div class="ld" id="ld" role="status" aria-live="polite"><div class="ldb"><div class="spin"></div><b id="ldt">খোলা হচ্ছে…</b><span id="lds"></span></div></div>
+
 <script src="config.js?v=3"></script>
 <script>
 const $=id=>document.getElementById(id);
 const store={get(k){try{return localStorage.getItem(k)||""}catch(e){return ""}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 const api=()=>(window.API_URL||"").replace(/\/+$/,"");
 const say=(t,e)=>{$("msg").textContent=t;$("msg").className=e?"err":""};
+const showLoad=(t,sub)=>{$("ldt").textContent=t;$("lds").textContent=sub||"";$("ld").hidden=false};
+const hideLoad=()=>{$("ld").hidden=true};
+addEventListener("load",()=>setTimeout(hideLoad,500));
+setTimeout(hideLoad,5000);
 
 /* ইনস্টল */
 let dp=null;
@@ -200,7 +212,7 @@ $("fetch").onclick=async()=>{
   const url=$("url").value.trim();
   if(!api()){say("সার্ভার এখন সংযুক্ত নেই। কিছুক্ষণ পরে আবার চেষ্টা করুন।",true);return}
   if(!/^https?:\/\//.test(url)){say("সঠিক লিংক দিন (https:// দিয়ে শুরু)।",true);return}
-  $("result").hidden=true;$("fetch").disabled=true;say("খোঁজা হচ্ছে… সার্ভার ঘুমিয়ে থাকলে প্রথমবার ১ মিনিট লাগতে পারে।");
+  $("result").hidden=true;$("fetch").disabled=true;say("");showLoad("খোঁজা হচ্ছে…","সার্ভার ঘুমিয়ে থাকলে প্রথমবার ১ মিনিট লাগতে পারে");
   try{
     const r=await fetch(`${api()}/api/info?url=${encodeURIComponent(url)}`);
     const d=await r.json().catch(()=>({}));
@@ -212,7 +224,7 @@ $("fetch").onclick=async()=>{
     $("result").hidden=false;say("");
     $("result").scrollIntoView({behavior:"smooth",block:"start"});
   }catch(e){say(e.message==="Failed to fetch"?"সার্ভারে যোগাযোগ করা যায়নি। লিংক ঠিক আছে কিনা দেখুন।":e.message,true)}
-  $("fetch").disabled=false;
+  $("fetch").disabled=false;hideLoad();
 };
 
 /* ডাউনলোড */
@@ -223,7 +235,7 @@ const nameFrom=cd=>{if(!cd)return null;let m=/filename\*=UTF-8''([^;]+)/i.exec(c
 $("dl").onclick=async()=>{
   if(S.busy)return;S.busy=true;$("dl").disabled=true;
   const q=`url=${encodeURIComponent(S.url)}&type=${S.type}`+(S.type==="video"?`&height=${S.h}`:"");
-  const bar=$("prog");bar.hidden=false;bar.classList.add("ind");$("pt").textContent="সার্ভার ফাইল তৈরি করছে… একটু অপেক্ষা করুন";
+  const bar=$("prog");bar.hidden=false;bar.classList.add("ind");$("pt").textContent="";showLoad("ডাউনলোড হচ্ছে…","সার্ভার ফাইল তৈরি করছে, একটু অপেক্ষা করুন");
   try{
     const r=await fetch(`${api()}/api/download?${q}`);
     if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||"ডাউনলোড ব্যর্থ হয়েছে")}
@@ -231,14 +243,14 @@ $("dl").onclick=async()=>{
     bar.classList.remove("ind");
     for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;
       bar.firstElementChild.style.width=total?(got/total*100)+"%":"60%";
-      $("pt").textContent=total?`ডাউনলোড হচ্ছে… ${Math.round(got/total*100)}%`:`ডাউনলোড হচ্ছে… ${(got/1048576).toFixed(1)} MB`}
+      $("lds").textContent=total?Math.round(got/total*100)+"%":(got/1048576).toFixed(1)+" MB"}
     const blob=new Blob(parts,{type:r.headers.get("Content-Type")||"application/octet-stream"});
     const a=document.createElement("a");a.href=URL.createObjectURL(blob);
     a.download=nameFrom(r.headers.get("Content-Disposition"))||(S.type==="audio"?"audio.mp3":"video.mp4");
     document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),60000);
     bar.firstElementChild.style.width="100%";$("pt").textContent="ডাউনলোড সম্পন্ন। ফাইলটি ফোনের Downloads এ আছে।";
   }catch(e){resetProg();say(e.message==="Failed to fetch"?"সার্ভারে যোগাযোগ করা যায়নি।":e.message,true)}
-  S.busy=false;$("dl").disabled=false;
+  S.busy=false;$("dl").disabled=false;hideLoad();
 };
 </script>
 </body>
