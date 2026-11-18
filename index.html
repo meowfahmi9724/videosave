@@ -163,7 +163,16 @@ const hasApi=()=>!!(MAIN()||HOME());
 const isYT=u=>{try{return/(^|\.)(youtube\.com|youtu\.be)$/i.test(new URL(u).hostname)}catch(e){return false}};
 /* সার্ভারের ক্রম: আগে Render (মূল), ব্যর্থ হলে ফোনের Termux (127.0.0.1), তারপর টানেল লিংক */
 const LOCAL="http://127.0.0.1:8000",sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const order=first=>{let l=[...new Set([MAIN(),LOCAL,HOME()].filter(Boolean))];
+/* ট্যাব/ঘরের সার্ভারের নতুন টানেল লিংক Cloudflare Worker থেকে নিজে নিজে নেওয়া */
+const REG=()=>norm(window.API_REGISTRY);
+async function loadHome(){
+  if(!REG())return;
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),4000);
+  try{const r=await fetch(REG()+"/url",{signal:c.signal,cache:"no-store"});const d=await r.json();
+    if(d&&/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(d.url||""))window.API_URL_HOME=d.url}catch(e){}
+  finally{clearTimeout(t)}
+}
+const order=first=>{let l=[...new Set([MAIN(),window.USE_LOCAL===false?"":LOCAL,HOME()].filter(Boolean))];
   if(first&&l.includes(first))l=[first,...l.filter(x=>x!==first)];
   return l};
 const alive=async(b,ms)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
@@ -171,6 +180,7 @@ const alive=async(b,ms)=>{const c=new AbortController(),t=setTimeout(()=>c.abort
 async function call(path,{first="",ms=120000,json=false,wait=240000}={}){
   let err=null,waiting=false;const t0=Date.now();
   for(;;){
+    await loadHome();
     if(waiting){$("lds").textContent="সার্ভার পাওয়া গেছে, কাজ চলছে…";waiting=false}
     for(const b of order(first)){
       if(b!==MAIN()&&!(await alive(b,b===LOCAL?2500:6000)))continue;
