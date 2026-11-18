@@ -172,18 +172,21 @@ async function loadHome(){
     if(d&&/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(d.url||""))window.API_URL_HOME=d.url}catch(e){}
   finally{clearTimeout(t)}
 }
-const order=first=>{let l=[...new Set([MAIN(),window.USE_LOCAL===false?"":LOCAL,HOME()].filter(Boolean))];
+const order=(first,url)=>{const LC=window.USE_LOCAL===false?"":LOCAL;
+  /* ইউটিউবে Render প্রায়ই আটকে যায়, তাই আগে ঘরের Termux; বাকি সাইটে আগে Render */
+  let l=[...new Set((isYT(url)?[HOME(),LC,MAIN()]:[MAIN(),LC,HOME()]).filter(Boolean))];
   if(first&&l.includes(first))l=[first,...l.filter(x=>x!==first)];
   return l};
 const alive=async(b,ms)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),ms);
   try{const r=await fetch(b+"/",{signal:c.signal,cache:"no-store"});return r.ok}catch(e){return false}finally{clearTimeout(t)}};
-async function call(path,{first="",ms=120000,json=false,wait=240000}={}){
-  let err=null,waiting=false;const t0=Date.now();
+async function call(path,{url="",first="",ms=120000,json=false,wait=240000}={}){
+  let err=null,waiting=false,log=[];const t0=Date.now();
+  const nm=b=>b===MAIN()?"Render":b===HOME()?"ট্যাব":"ফোন";
   for(;;){
-    await loadHome();
+    log=[];await loadHome();
     if(waiting){$("lds").textContent="সার্ভার পাওয়া গেছে, কাজ চলছে…";waiting=false}
-    for(const b of order(first)){
-      if(b!==MAIN()&&!(await alive(b,b===LOCAL?2500:6000)))continue;
+    for(const b of order(first,url)){
+      if(b!==MAIN()&&!(await alive(b,b===LOCAL?2500:6000))){log.push(nm(b)+": বন্ধ");continue}
       const ctl=new AbortController(),t=setTimeout(()=>ctl.abort(),ms);
       try{
         const r=await fetch(b+path,{signal:ctl.signal});clearTimeout(t);
@@ -191,21 +194,23 @@ async function call(path,{first="",ms=120000,json=false,wait=240000}={}){
           if(!json)return{r,b};
           const d=await r.json().catch(()=>null);
           if(d)return{r,b,d};
+          log.push(nm(b)+": ভুল উত্তর");
         }else{
           const d=await r.json().catch(()=>null);
           if(d&&d.error&&!err)err=new Error(d.error);
+          log.push(nm(b)+": "+(d&&d.error?d.error.slice(0,70):"HTTP "+r.status));
         }
-      }catch(e){clearTimeout(t)}
+      }catch(e){clearTimeout(t);log.push(nm(b)+": সাড়া নেই")}
     }
-    if(err)throw err;
+    if(err)throw new Error(err.message+" ["+log.join(" | ")+"]");
     if(Date.now()-t0>wait)break;
     waiting=true;$("lds").textContent="সার্ভার পাওয়া যাচ্ছে না। Termux-এ bash start.sh দিন, চালু হলেই নিজে থেকে শুরু হবে…";
     await sleep(3000);
   }
-  throw new Error("সার্ভারে যোগাযোগ করা যায়নি।");
+  throw new Error("সার্ভারে যোগাযোগ করা যায়নি। ["+log.join(" | ")+"]");
 }
-async function getInfo(url){const{d,b}=await call(`/api/info?url=${encodeURIComponent(url)}`,{json:true});return{d,b}}
-const getFile=(q,first)=>call(`/api/download?${q}`,{first,ms:600000});
+async function getInfo(url){const{d,b}=await call(`/api/info?url=${encodeURIComponent(url)}`,{url,json:true});return{d,b}}
+const getFile=(url,q,first)=>call(`/api/download?${q}`,{url,first,ms:600000});
 const say=(t,e)=>{$("msg").textContent=t;$("msg").className=e?"err":""};
 const showLoad=(t,sub)=>{$("ldt").textContent=t;$("lds").textContent=sub||"";$("ld").hidden=false};
 const hideLoad=()=>{$("ld").hidden=true};
@@ -288,7 +293,7 @@ $("dl").onclick=async()=>{
     let parts,r;
     for(let tries=0;;tries++){
       try{
-        ({r}=await getFile(q,S.api));
+        ({r}=await getFile(S.url,q,S.api));
         const total=+r.headers.get("Content-Length")||0,rd=r.body.getReader();parts=[];let got=0;
         bar.classList.remove("ind");
         for(;;){const{done,value}=await rd.read();if(done)break;parts.push(value);got+=value.length;
